@@ -27,7 +27,7 @@ class View:
     |   | |    |----| |   |
     |---/ |--- |    | |---/
 """
-    class Viewable:
+    class Viewable(object):
 
         def __init__(self, xy, piece_char, attr=None):
             (self.xy, self.piece_char, self.attr) =\
@@ -38,7 +38,7 @@ class View:
             return self.piece_char
 
         def get_location_map(self):
-            return {tuple(self.xy): self}
+            return {tuple([int(coord) for coord in self.xy]): self}
 
         def collision_callback(self, *args):
             raise NotImplementedError
@@ -49,7 +49,7 @@ class View:
         def set_color(self, color):
             self.color = color
 
-    class ViewableContainer:
+    class ViewableContainer(Viewable):
 
         def __init__(self, *args):
             """
@@ -90,7 +90,10 @@ class View:
                 yield viewable
 
         def __getitem__(self, x):
-            return self.expand_viewables()[x]
+            viewables = self.expand_viewables()[x]
+            if isinstance(viewables, list):
+                viewables = View.ViewableContainer(*viewables)
+            return viewables
 
         def get_location_map(self):
             locations = {}
@@ -99,7 +102,7 @@ class View:
             return locations
 
         def get_collision(self, viewable):
-            xy = tuple(viewable.xy)
+            xy = tuple([int(coord) for coord in viewable.xy])
             if xy in self.get_location_map():
                 return self.get_location_map()[xy]
             else:
@@ -130,7 +133,7 @@ class View:
         pieces = self.model.get_all_drawable_locations()
         for location in pieces:
             attr = pieces[location].attr
-            self.stdscr.addch(location[0], location[1],
+            self.stdscr.addch(int(location[0]), int(location[1]),
                               pieces[location].get_piece_char(),
                               curses.color_pair(pieces[location].color))
         self.stdscr.refresh()
@@ -138,6 +141,7 @@ class View:
     def show_dead_message(self):
         self.stdscr.addstr(0, 0, self.DEAD_MESSAGE, curses.color_pair(View.RED_COLOR))
         self.stdscr.refresh()
+
 
 class Model:
 
@@ -154,7 +158,7 @@ class Model:
                       leader.xy[1]-leader.dxdy[1]]
                 dxdy = leader.dxdy[:]
 
-            super().__init__(xy, piece_char)
+            super(Model.SnakePiece, self).__init__(xy, piece_char)
             (self.leader, self.dxdy, self.parent) = (leader, dxdy, parent)
             self.color = self.DEFAULT_COLOR
 
@@ -196,7 +200,7 @@ class Model:
         DEFAULT_COLOR = View.YELLOW_COLOR
 
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
+            super(Model.HeadPiece, self).__init__(*args, **kwargs)
             self.color = self.DEFAULT_COLOR
 
 
@@ -233,7 +237,7 @@ class Model:
             self.full_body = View.ViewableContainer(*[self.head, self.tail])
             self.dead = False
             self.tail_color = None
-            super().__init__(self.full_body)
+            super(Model.Snake, self).__init__(self.full_body)
 
         def create_tail(self, head, length):
             tail = [Model.TailPiece(self, head)]
@@ -273,7 +277,7 @@ class Model:
 
     class Apple(View.Viewable):
         def __init__(self, xy, model):
-            super().__init__(xy, View.APPLE_CHAR)
+            super(Model.Apple, self).__init__(xy, View.APPLE_CHAR)
             self.color = View.RED_COLOR
             self.model = model
 
@@ -286,7 +290,7 @@ class Model:
 
     class Block(View.Viewable):
         def __init__(self, xy):
-            super().__init__(xy, View.BLOCK_CHAR)
+            super(Model.Block, self).__init__(xy, View.BLOCK_CHAR)
 
         def collision_callback(self, snake):
             snake.dead = True
@@ -296,7 +300,7 @@ class Model:
         HORIZONTAL_CHAR = '-'
 
         def __init__(self, xy, is_vertical):
-            super().__init__(xy,
+            super(Model.WallBlock, self).__init__(xy,
                              self.VERTICAL_CHAR if is_vertical else self.HORIZONTAL_CHAR)
 
         def collision_callback(self, snake):
@@ -309,7 +313,7 @@ class Model:
                     xy[1]+(i if not is_vertical else 0)]
                    for i in range(wall_length)]
             self.walls = [Model.WallBlock(xy, is_vertical) for xy in xys]
-            super().__init__(*self.walls)
+            super(Model.Wall, self).__init__(*self.walls)
 
 
     INIT_LENGTH = 5
@@ -317,7 +321,7 @@ class Model:
     DEFAULT_WIDTH = 70
     DEFAULT_HEIGHT = 25
 
-    DEFAULT_N_APPLES = 1
+    DEFAULT_N_APPLES = 2
     DEFAULT_N_BLOCKS = 1
 
     def __init__(self, xy=None, dxdy=None,
@@ -353,7 +357,7 @@ class Model:
         self.score1.set_color(View.GREEN_COLOR)
         self.score2 = View.Viewable([self.height, width - 5], '0')
         self.score2.set_color(View.CYAN_COLOR)
-        self.scores = [0,0]
+        self.scores = [0, 0]
 
         self.all_objects = View.ViewableContainer(self.blocks,
                                                   self.apples,
@@ -362,8 +366,8 @@ class Model:
                                                   self.score2,
                                                   *self.snakes)
         self.collidable_objects = View.ViewableContainer(self.blocks,
-                                                         self.snake1.tail,
-                                                         self.snake2.tail,
+                                                         self.snake1.tail[1:],
+                                                         self.snake2.tail[1:],
                                                          self.apples,
                                                          self.walls)
 
@@ -422,7 +426,7 @@ class Model:
 
 
 class Controller:
-    SPEED = 15
+    SPEED = 15.
 
     KEY_MAPS = [{
         curses.KEY_DOWN: Model.Snake.UP,
@@ -441,7 +445,7 @@ class Controller:
         ord('d'): Model.Snake.RIGHT
     }]
 
-    STOP_KEY = curses.KEY_BACKSPACE
+    STOP_KEY = curses.KEY_ENTER
 
     def __init__(self, paired):
         self.interrupted = False
