@@ -1,0 +1,6 @@
+#!/bin/bash
+printf '\e[8;50;100t'
+while [[ 1 == 1 ]]; do
+    read X
+    python3.5 `dirname $0`/2nake.py ${X}
+done
