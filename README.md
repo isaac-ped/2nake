@@ -1,11 +1,7 @@
 # 2nake
 
-Be sure to maximize your terminal before running the following:
+Be sure to maximize your terminal before running:
 
-python 2nake.py
+python sn2ke.py
 
-or
-
-python 2nake.py wasd
-
-Can also run with "./runner" or by double-clicking on the runner icon
+Can also run with "./runner" or by double-clicking on the runner icon (which should make terminal large enough automatically)
