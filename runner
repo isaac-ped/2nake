@@ -1,3 +1,3 @@
 #!/bin/bash
 printf '\e[8;50;100t'
-python3.5 `dirname $0`/sn2ke.py 
+python `dirname $0`/sn2ke.py 

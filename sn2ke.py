@@ -29,11 +29,11 @@ class View:
 """
 
     WELCOME_MESSAGE = r"""
-                   ____   _       ____         _____
-                  /      / \   / /    / /   / /
-                 /____  /  |  /  ____/ /___/ /____
-                     / /   | /  /     / \   /
-                ____/ /    |/  /____ /   \ /____
+                   ____    _        ____           _____
+                  /       / \   /  /    /  /   /  /
+                 /____   /  |  /   ____/  /___/  /____
+                     /  /   | /   /      / \    /
+                ____/  /    |/   /____  /   \  /____
 
                 * Press UP to play mirror-mode
                 * Press DN to play switch-mirror-mode
@@ -59,7 +59,7 @@ class View:
         stdscr.refresh()
 
     def __init__(self):
-        # TODO: I'd like stdscr to be a local variable here, but it's also needed for
+        # TODO: I'd like stdscr (used for display)  to be a local variable here, but it's also needed for
         #       gathering keypress, which should be in controller?
         self._define_colors()
 
@@ -83,8 +83,11 @@ class Model:
 
     class Viewable(object):
 
-        def __init__(self, xy, icon, color=0):
+        def __init__(self, xy, icon=None, color=0):
             (self._xy, self.color) = (xy, color)
+            
+            #  Have to check for the presense of the icon, because it's
+            #  a property in inhereted classes
             if icon:
                 self.icon = icon
 
@@ -98,9 +101,13 @@ class Model:
         def xy(self, xy):
             self._viewable_by_location = {tuple(xy): self}
             self._xy = xy
+            # TODO: Notify containing object when the viewable changes?
 
         @property
         def viewables_by_location(self):
+            """
+            Returns a dictionary that points from the Viewable's location to the viewable
+            """
             return self._viewable_by_location
 
     class Collidable(Viewable):
@@ -109,19 +116,21 @@ class Model:
             raise NotImplementedError
 
     class ViewableContainer(Viewable):
+        """
+        A set of viewables and ViewableContainers.
+        Can be indexed or iterated over as a list.
+        """
 
         def __init__(self, *viewables):
             """
             :param *viewables: Each Viewable or ViewableContainer input as a separate argument
             """
             if not all([isinstance(viewable, Model.Viewable) for viewable in viewables]):
-                raise Exception('Viewable list %s contains non-viewables'%viewables.__repr__())
+                raise Exception('Viewable list %s contains non-viewables'%viewables)
             if len(viewables) > 0:
                 self.viewables = list(viewables)
-                self.expanded_viewables = self._expand_viewables()
             else:
                 self.viewables = []
-                self.expanded_viewables = []
 
         def __add__(self, viewable):
             if isinstance(viewable, Model.Viewable):
@@ -131,7 +140,7 @@ class Model:
                     return Model.ViewableContainer(viewable)
             else:
                 raise Exception('Attempted to append non-viewable %s to viewable container'
-                                % viewable.__repr__())
+                                % viewable)
 
         def append(self, viewable):
             if isinstance(viewable, Model.Viewable):
@@ -141,32 +150,20 @@ class Model:
                     self.viewables = [viewable]
             else:
                 raise Exception('Attempted to append non-viewable %s to viewable container'
-                                % viewable.__repr__())
-            if isinstance(viewable, Model.ViewableContainer):
-                self.expanded_viewables.extend(viewable._expand_viewables())
-            else:
-                self.expanded_viewables.append(viewable)
+                                % viewable)
 
         def remove(self, item):
             del self.viewables[self.viewables.index(item)]
-            self.expanded_viewables = self._expand_viewables()
-
-        def _expand_viewables(self):
-            expanded = []
-            for viewable in self.viewables:
-                if isinstance(viewable, Model.ViewableContainer):
-                    expanded.extend(viewable._expand_viewables())
-                elif isinstance(viewable, Model.Viewable):
-                    expanded.append(viewable)
-                else:
-                    raise Exception('Non-Viewable in viewableContainer. How???')
-            return expanded
 
         def __iter__(self):
             for viewable in self.viewables:
                 yield viewable
 
         def __getitem__(self, x):
+            """
+            Returns a viewable if an index is passed in,
+            or a ViewableContainer if a slice is passed in
+            """
             viewables = self.viewables[x]
             if isinstance(viewables, list):
                 viewables = Model.ViewableContainer(*viewables)
@@ -175,12 +172,14 @@ class Model:
         @property
         def viewables_by_location(self):
             """
-            Returns a {location:viewable} dict for all objects in all viewables
+            Returns a {location:viewable} dict for all viewables contained,
+            even those within ViewableContainers
             :return:
             """
             #  FIXME: Should not have to recalculate every time?
+            #  FIXME: Would require notifying the container when a location changes?
             locations = {}
-            for viewable in self._expand_viewables():
+            for viewable in self.viewables:
                 locations.update(viewable.viewables_by_location)
             return locations
 
@@ -192,12 +191,13 @@ class Model:
                 return None
 
         def __len__(self):
-            return len(self._expand_viewables())
+            return len(self.viewables)
 
         def __repr__(self):
-            return "%s:<%s>" % (type(self).__name__, self.viewables.__repr__())
+            return "%s{%s}" % (type(self).__name__, self.viewables)
 
     class SnakePiece(Viewable):
+
         DEFAULT_COLOR = View.COLORS['green']
 
         def __init__(self,
@@ -207,8 +207,7 @@ class Model:
                      icon=None,
                      color=None):
 
-            if color:
-                self.color = self.DEFAULT_COLOR
+            self.color = color if color else self.DEFAULT_COLOR
 
             super(Model.SnakePiece, self).__init__(xy, icon)
             (self._dxdy, self.parent) = (dxdy, parent)
@@ -222,8 +221,6 @@ class Model:
         def is_opposite_direction(self, dxdy):
             """
             Returns whether the provided location is in the opposite direction as the snake piece
-            :param dxdy:
-            :return:
             """
             return dxdy[0] == -self.dxdy[0] or dxdy[1] == -self.dxdy[1]
 
@@ -235,22 +232,24 @@ class Model:
         def dxdy(self, dxdy):
             """
             Only allow setting of direction if it is not in the opposite direction
-            :param dxdy:
-            :return:
             """
             if not self.is_opposite_direction(dxdy):
                 self._dxdy = dxdy
 
     class TailPiece(SnakePiece, Collidable):
+
         VERTICAL_CHAR = '|'
         HORIZONTAL_CHAR = '-'
 
         def __init__(self,
                      parent,
                      leader=None,
-                     color=None,
-                     icon=None):
-
+                     color=None):
+            """
+            :param parent: The snake to which the TailPiece belongs
+            :param leader: The TailPiece or HeadPiece which this piece follows
+            :param color: The color of this icon
+            """
             xy = [leader.xy[0]-leader.dxdy[0],
                   leader.xy[1]-leader.dxdy[1]]
 
@@ -258,7 +257,7 @@ class Model:
 
             self.leader = leader
 
-            super(Model.TailPiece, self).__init__(parent, xy, dxdy, icon, color)
+            super(Model.TailPiece, self).__init__(parent, xy, dxdy, color=color)
 
         def collision_callback(self, snake):
             snake.dead = True
@@ -302,19 +301,18 @@ class Model:
 
     class Snake(ViewableContainer):
 
-        VERTICAL_SPEED = 9
+        VERTICAL_SPEED = 10
         HORIZONTAL_SPEED = 15
 
         def __init__(self, xy, dxdy, length, keymap):
 
-            (self.xy, self._dxdy, self.length, ) = \
-                (xy, dxdy[:], length, )
+            (self.xy, self._dxdy, self.length, self.keymap ) = \
+                (xy, dxdy[:], length, keymap)
             self.head = Model.HeadPiece(self, xy=xy, dxdy=dxdy)
             self.tail = self.create_tail(self.head, length)
             self.full_body = Model.ViewableContainer(self.head, self.tail)
             self.dead = False
             self.tail_color = None
-            self.keymap = keymap
             super(Model.Snake, self).__init__(self.full_body)
 
         def create_tail(self, head, length):
@@ -381,6 +379,7 @@ class Model:
                 return self.HORIZONTAL_SPEED
 
     class Apple(Collidable):
+
         DEFAULT_COLOR = View.COLORS['red']
 
         def __init__(self, xy, model):
@@ -398,6 +397,7 @@ class Model:
                 self.model.switch_snakes()
 
     class Block(Collidable):
+
         def __init__(self, xy):
             super(Model.Block, self).__init__(xy, View.BLOCK_CHAR)
 
@@ -405,6 +405,7 @@ class Model:
             snake.dead = True
 
     class WallBlock(Collidable):
+
         VERTICAL_CHAR = '|'
         HORIZONTAL_CHAR = '-'
 
@@ -417,7 +418,9 @@ class Model:
             snake.dead = True
 
     class Wall(ViewableContainer):
-
+        """
+        A series of WallBlocks in the horizontal or vertical direction
+        """
         def __init__(self, xy, wall_length, is_vertical):
             xys = [[xy[0]+(i if is_vertical else 0),
                     xy[1]+(i if not is_vertical else 0)]
@@ -426,7 +429,10 @@ class Model:
             super(Model.Wall, self).__init__(*self.walls)
 
     class ScoreNumber(Viewable):
-
+        """
+        The viewable number that designates the score
+        """
+        # TODO: I don't actually know what happens if the score goes above 9
         def __init__(self, xy, value=0, color=None):
             self._value = value
             super(Model.ScoreNumber, self).__init__(xy, str(value), color)
@@ -492,6 +498,9 @@ class Model:
                                                             self.snakes])
 
     def switch_snakes(self):
+        """
+        Used to switch the controls and colors for the two snakes
+        """
         self.snakes[0].keymap, self.snakes[1].keymap = \
             self.snakes[1].keymap, self.snakes[0].keymap
 
@@ -502,6 +511,9 @@ class Model:
             self.snakes[1].tail_color, self.snakes[0].tail_color
 
     def make_walls(self):
+        """ 
+        Makes all four walls
+        """
         return Model.ViewableContainer(*[
             Model.Wall([0, 0], self.width, False),
             Model.Wall([0, 0], self.height, True),
@@ -510,6 +522,9 @@ class Model:
         ])
 
     def get_starting_locations(self, paired):
+        """
+        Gets the starting location for the two snakes
+        """
         if not paired:
             xys = [[5, int(self.width/3)]]
             dxdys = [Model.DOWN]
@@ -523,6 +538,9 @@ class Model:
         return xys, dxdys
 
     def random_location(self):
+        """
+        Gets a random xy location somewhere within the game
+        """
         return random.randint(1, self.height-1), random.randint(1, self.width-1)
 
     def random_apples(self, n_apples):
@@ -559,16 +577,21 @@ class Model:
         return any([snake.dead for snake in self.snakes])
 
     def increment_score(self, scored_snake):
+        """
+        Increments the score associated with the snake that was passed in
+        """
         for (score, snake) in zip(self.scores, self.snakes):
             if scored_snake == snake:
                 score.value += 1
 
 
 class Controller:
-    RENDER_SPEED = 100
+    RENDER_SPEED = 200
 
     CHOOSE_PAIRED_KEY = curses.KEY_UP
     CHOOSE_SWITCH_KEY = curses.KEY_DOWN
+    CHOOSE_INDEPENDENT_KEY = ord('w')
+    STOP_KEY = ord('q')
 
     PAIRED_KEY_MAPS = [{
         curses.KEY_DOWN: Model.DOWN,
@@ -582,8 +605,6 @@ class Controller:
         curses.KEY_LEFT: Model.RIGHT
     }]
 
-    CHOOSE_INDEPENDENT_KEY = ord('w')
-
     INDEPENDENT_KEY_MAPS = [{
         ord('w'): Model.UP,
         ord('s'): Model.DOWN,
@@ -596,33 +617,46 @@ class Controller:
         curses.KEY_RIGHT: Model.RIGHT
     }]
 
-    STOP_KEY = ord('q')
 
     def __init__(self):
+        """
+        Controller initializes the View on initialization
+        Model is not initialized until the game actually starts
+        """
         self.stdscr = curses.initscr()
         self.view = View()
         self.interrupted = False
         self.model = None
 
     def _monitor_keypress(self, stdscr):
-
+        """
+        The loop that monitors the keypresses during the game
+        and changes the direction of the snakes
+        """
         while not self.interrupted:
             char_pressed = stdscr.getch()
             if char_pressed == self.STOP_KEY:
                 self.interrupted = True
+                break
             for snake in self.model.snakes:
                 if char_pressed in snake.keymap:
                     snake.dxdy = snake.keymap[char_pressed]
 
     def _advance_single_snake_loop(self, snake):
+        """
+        Calls the "move" function of a single snake in a loop
+        """
         while not self.model.is_game_over() and not self.interrupted:
             snake.move()
             hit_item = self.model.collidable_objects.get_collision(snake.head)
             if hit_item:
                 hit_item.collision_callback(snake)
-            time.sleep(1/snake.speed)
+            time.sleep(1./snake.speed)
 
     def start_game(self):
+        """
+        Initialization, home screen
+        """
         ch = None
         curses.noecho()
         curses.cbreak()
@@ -640,12 +674,17 @@ class Controller:
             elif ch == self.CHOOSE_SWITCH_KEY:
                 self.model = Model(paired=True, switching=True, keymaps=self.PAIRED_KEY_MAPS)
                 self.play_round(self.stdscr)
+
+        # Teardown
         curses.nocbreak()
         self.stdscr.keypad(0)
         curses.echo()
         curses.endwin()
 
     def play_round(self, stdscr):
+        """
+        Play a single round of the game 
+        """
         self.interrupted = False
         keypress_thread = threading.Thread(target=self._monitor_keypress,
                                            args=[stdscr])
@@ -659,6 +698,9 @@ class Controller:
         stdscr.getch()
 
     def _render_loop(self, stdscr):
+        """
+        The loop that calls the "render" function of the View
+        """
         while not self.model.is_game_over() and not self.interrupted:
             self.view.render(self.model.all_objects.viewables_by_location, stdscr)
             time.sleep(1/self.RENDER_SPEED)
